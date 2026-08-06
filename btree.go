@@ -86,3 +86,39 @@ func (node BNode) setPointer(idx uint16, value uint64) {
 
 	binary.LittleEndian.PutUint64(node[pos:], value)
 }
+
+// Returns the relative offset (within the KV data section) where the idx-th
+// KV pair begins. idx may range from 0 to nkeys (inclusive). idx == nkeys
+// returns the offset just past the last KV pair.
+func (node BNode) getOffset(idx uint16) uint16 {
+
+	if idx > node.nkeys() {
+		panic("offset index out of bounds")
+	}
+
+	if idx == 0 {
+		return 0
+	}
+
+	pos := 4 + node.nkeys()*8 + 2*(idx-1)
+
+	return binary.LittleEndian.Uint16(node[pos:])
+}
+
+// Stores the relative offset of the idx-th KV pair.
+// Offset for idx == 0 is always 0 and is not stored.
+
+func (node BNode) setOffset(idx uint16, offset uint16) {
+
+	if idx > node.nkeys() {
+		panic("offset index out of bounds")
+	}
+
+	if idx == 0 {
+		return
+	}
+
+	pos := 4 + node.nkeys()*8 + 2*(idx-1)
+
+	binary.LittleEndian.PutUint16(node[pos:], offset)
+}
