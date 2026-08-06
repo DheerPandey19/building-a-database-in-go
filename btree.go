@@ -169,3 +169,49 @@ func (node BNode) getKey(idx uint16) []byte {
 	// Skip the 4-byte size header and return only the key bytes.
 	return node[pos+4 : pos+4+klen]
 }
+
+// Returns the value stored at index idx.
+func (node BNode) getVal(idx uint16) []byte {
+
+	if idx >= node.nkeys() {
+		panic("value index out of bounds")
+	}
+
+	// Beginning of this KV pair.
+	pos := node.kvPos(idx)
+
+	// Read the key and value lengths.
+	klen := binary.LittleEndian.Uint16(node[pos:])
+	vlen := binary.LittleEndian.Uint16(node[pos+2:])
+
+
+	// Skip:
+	//   4 bytes -> key_size + val_size
+	//   klen    -> key bytes
+	// to arrive at the beginning of the value.
+	vStart := pos + 4 + klen
+
+	return node[vStart : vStart+vlen]
+}
+
+// Returns the number of bytes currently occupied by this node.
+func (node BNode) nbytes() uint16 {
+
+	//last one's offset points to end
+
+	// Page layout:
+	//
+	// +-----------------------------------------------------------+
+	// | Header | Pointer Array | Offset Array | KV Data | Unused |
+	// +-----------------------------------------------------------+
+	//
+	// Occupied bytes =
+	//   Header
+	// + Pointer Array
+	// + Offset Array
+	// + KV Data
+	//
+	// getOffset(nkeys()) returns the offset immediately after the
+	// last KV pair, i.e. the total size of the KV data section.
+	return 4 + 8*node.nkeys() + 2*node.nkeys() + node.getOffset(node.nkeys())
+}
