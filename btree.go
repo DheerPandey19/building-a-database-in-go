@@ -87,6 +87,10 @@ func (node BNode) setPointer(idx uint16, value uint64) {
 	binary.LittleEndian.PutUint64(node[pos:], value)
 }
 
+// -----------------------------------------------------------------------------
+// Offset Array
+// -----------------------------------------------------------------------------
+
 // Returns the relative offset (within the KV data section) where the idx-th
 // KV pair begins. idx may range from 0 to nkeys (inclusive). idx == nkeys
 // returns the offset just past the last KV pair.
@@ -107,7 +111,6 @@ func (node BNode) getOffset(idx uint16) uint16 {
 
 // Stores the relative offset of the idx-th KV pair.
 // Offset for idx == 0 is always 0 and is not stored.
-
 func (node BNode) setOffset(idx uint16, offset uint16) {
 
 	if idx > node.nkeys() {
@@ -121,4 +124,48 @@ func (node BNode) setOffset(idx uint16, offset uint16) {
 	pos := 4 + node.nkeys()*8 + 2*(idx-1)
 
 	binary.LittleEndian.PutUint16(node[pos:], offset)
+}
+
+// -----------------------------------------------------------------------------
+// Key-Value Access
+// -----------------------------------------------------------------------------
+
+// Returns the absolute byte position (within the page) where the idx-th
+// KV pair begins.
+func (node BNode) kvPos(idx uint16) uint16 {
+
+	if idx > node.nkeys() {
+		panic("KV index out of bounds")
+	}
+
+	// Layout:
+	// Header | Pointer Array | Offset Array | KV Data
+	//
+	// kvPos = start of KV Data + relative offset of the idx-th KV.
+	return 4 +
+		8*node.nkeys() +
+		2*node.nkeys() +
+		node.getOffset(idx)
+}
+
+// Returns the key stored at index idx.
+func (node BNode) getKey(idx uint16) []byte {
+
+	if idx >= node.nkeys() {
+		panic("key index out of bounds")
+	}
+
+	// Beginning of this KV pair.
+	pos := node.kvPos(idx)
+
+	// Read key length.
+	klen := binary.LittleEndian.Uint16(node[pos:])
+
+	// KV layout:
+	// +----------+----------+------+------+
+	// | key_size | val_size | key  | val  |
+	// +----------+----------+------+------+
+	//
+	// Skip the 4-byte size header and return only the key bytes.
+	return node[pos+4 : pos+4+klen]
 }
