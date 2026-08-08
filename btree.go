@@ -251,3 +251,53 @@ func nodeAppendKV(new BNode, idx uint16, ptr uint64, key []byte, val []byte) {
 		new.getOffset(idx)+4+uint16(len(key))+uint16(len(val)),
 	)
 }
+
+// -----------------------------------------------------------------------------
+// Copy a range of KV pairs from an old node into a new node
+// -----------------------------------------------------------------------------
+//
+// new    -> destination node
+// old    -> source node
+// dstNew -> index in new where copying starts
+// srcOld -> index in old where copying starts
+// n      -> number of KV pairs to copy
+//
+// Example:
+//
+// old:  [k1] [k3] [k7]
+//             ↑
+//          srcOld = 1
+//
+// new:  [   ] [   ]
+//        ↑
+//     dstNew = 0
+//
+// nodeAppendRange(new, old, 0, 1, 2)
+//
+// copies:
+// old[1] -> new[0]
+// old[2] -> new[1]
+//
+func nodeAppendRange(
+	new BNode,
+	old BNode,
+	dstNew uint16,
+	srcOld uint16,
+	n uint16,
+) {
+	for i := uint16(0); i < n; i++ {
+
+		dst := dstNew + i
+		src := srcOld + i
+
+		// Copy the pointer, key, and value
+		// using the existing nodeAppendKV helper.
+		nodeAppendKV(
+			new,
+			dst,
+			old.getPointer(src),
+			old.getKey(src),
+			old.getVal(src),
+		)
+	}
+}
