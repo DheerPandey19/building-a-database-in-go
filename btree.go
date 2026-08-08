@@ -301,3 +301,50 @@ func nodeAppendRange(
 		)
 	}
 }
+
+// -----------------------------------------------------------------------------
+// Insert a new KV pair into a leaf node
+// -----------------------------------------------------------------------------
+//
+// Creates a new leaf node from the old node with one additional KV pair.
+//
+// The insertion works in three steps:
+//
+// 1. Copy all KVs before idx
+// 2. Insert the new KV at idx
+// 3. Copy all remaining KVs after idx
+//
+// Example:
+//
+// old:  [k1] [k3] [k7]
+//                 ^
+//             insert k5 at idx=2
+//
+// new:  [k1] [k3] [k5] [k7]
+//
+
+func leafInsert(old BNode, new BNode, idx uint16, key []byte, value []byte) {
+    new.setHeader(BNODE_LEAF, old.nkeys()+1)
+
+    // Copy KVs before the insertion point.
+    nodeAppendRange(new, old, 0, 0, idx)
+
+    // Insert the new KV at idx.
+    nodeAppendKV(new, idx, 0, key, value)
+
+    // Copy the remaining KVs, shifted one position to the right.
+    nodeAppendRange(new, old, idx+1, idx, old.nkeys()-idx)
+}
+
+func leafUpdate(old BNode, new BNode, idx uint16, key []byte, value []byte) {
+    new.setHeader(BNODE_LEAF, old.nkeys())
+
+    // Copy KVs before the update position.
+    nodeAppendRange(new, old, 0, 0, idx)
+
+    // Replace the existing KV at idx.
+    nodeAppendKV(new, idx, 0, key, value)
+
+    // Copy the remaining KVs without shifting them.
+    nodeAppendRange(new, old, idx+1, idx+1, old.nkeys()-(idx+1))
+}
