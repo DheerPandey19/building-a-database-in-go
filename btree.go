@@ -199,19 +199,55 @@ func (node BNode) nbytes() uint16 {
 
 	//last one's offset points to end
 
-	// Page layout:
-	//
-	// +-----------------------------------------------------------+
-	// | Header | Pointer Array | Offset Array | KV Data | Unused |
-	// +-----------------------------------------------------------+
-	//
-	// Occupied bytes =
-	//   Header
-	// + Pointer Array
-	// + Offset Array
-	// + KV Data
-	//
-	// getOffset(nkeys()) returns the offset immediately after the
-	// last KV pair, i.e. the total size of the KV data section.
+	
 	return 4 + 8*node.nkeys() + 2*node.nkeys() + node.getOffset(node.nkeys())
+}
+
+
+
+// -----------------------------------------------------------------------------
+// Node Construction
+// ----------------------------------------------------------------------------
+
+func nodeAppendKV(new BNode, idx uint16, ptr uint64, key []byte, val []byte) {
+
+	// -------------------------------------------------------------------------
+	// 1. Store the pointer
+	// -------------------------------------------------------------------------
+
+	new.setPointer(idx, ptr)
+
+	// -------------------------------------------------------------------------
+	// 2. Find where this KV should start
+	// -------------------------------------------------------------------------
+
+	pos := new.kvPos(idx)
+
+	// -------------------------------------------------------------------------
+	// 3. Store key and value lengths
+	// -------------------------------------------------------------------------
+
+	binary.LittleEndian.PutUint16(new[pos:], uint16(len(key)))
+	binary.LittleEndian.PutUint16(new[pos+2:], uint16(len(val)))
+
+	// -------------------------------------------------------------------------
+	// 4. Store the key
+	// -------------------------------------------------------------------------
+
+	copy(new[pos+4:], key)
+
+	// -------------------------------------------------------------------------
+	// 5. Store the value
+	// -------------------------------------------------------------------------
+
+	copy(new[pos+4+uint16(len(key)):], val)
+
+	// -------------------------------------------------------------------------
+	// 6. Store the offset for the NEXT KV
+	// -------------------------------------------------------------------------
+
+	new.setOffset(
+		idx+1,
+		new.getOffset(idx)+4+uint16(len(key))+uint16(len(val)),
+	)
 }
