@@ -1,6 +1,7 @@
 package main
 
-import "encoding/binary"
+import ("bytes",
+         "encoding/binary")
 
 // -----------------------------------------------------------------------------
 // Page Layout
@@ -347,4 +348,45 @@ func leafUpdate(old BNode, new BNode, idx uint16, key []byte, value []byte) {
 
     // Copy the remaining KVs without shifting them.
     nodeAppendRange(new, old, idx+1, idx+1, old.nkeys()-(idx+1))
+}
+
+// -----------------------------------------------------------------------------
+// Find the last key <= the given key
+// -----------------------------------------------------------------------------
+//
+// Returns the index of the largest key that is <= key.
+//
+// Example:
+//
+// node:   [k1] [k3] [k7]
+//
+// lookup k3 -> 1
+// lookup k5 -> 1
+// lookup k7 -> 2
+// lookup k9 -> 2
+//
+
+
+func nodeLookupLE(node BNode,current[]byte) uint16{
+	nkeys :=node.nkeys()
+
+	var i uint16
+
+	// 	bytes.Compare(a, b)
+	// Result	Meaning
+	// < 0	a < b
+	// 0	a == b
+	// > 0	a > b
+	for i:=0;i<nkeys;i++{
+		cmp := bytes.Compare(node.getKey(i),current)
+
+		if cmp == 0{
+			return i
+		}
+		if cmp > 0{
+			return i-1
+		}
+		
+	}
+	return i-1
 }
