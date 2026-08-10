@@ -41,6 +41,28 @@ const (
 type BNode []byte
 
 // -----------------------------------------------------------------------------
+// BTree
+// -----------------------------------------------------------------------------
+
+// B+Tree structure.
+// B+Tree does not directly know how pages are stored on disk.
+// Instead, the B+Tree 3 functions (callbacks) that handle disk/page operations:
+type BTree struct {
+	// Root page number.
+	root uint64
+
+	// Read a node from a page number.
+	get func(uint64) []byte
+
+	// Allocate a new page containing the given node.
+	new func([]byte) uint64
+
+	// Delete/deallocate a page.
+	del func(uint64)
+}
+
+
+// -----------------------------------------------------------------------------
 // Header
 // -----------------------------------------------------------------------------
 
@@ -463,4 +485,72 @@ func nodeSplit2(old BNode, left BNode, right BNode) {
 
     // Copy right half.
     nodeAppendRange(right, old, 0, nleft, nright)
+}
+
+// -----------------------------------------------------------------------------
+// Split an oversized node into 1, 2, or 3 nodes
+// -----------------------------------------------------------------------------
+//
+// If the node already fits in one page, no split is needed.
+//
+// Otherwise:
+//   1. Split old into left + right.
+//   2. If left fits, return 2 nodes.
+//   3. If left is still too large, split left again.
+//
+// This handles the case where a large KV near the middle of the node
+// prevents the first split from producing two page-sized nodes.
+
+
+func nodeSplit3(old BNode)(uint16,[3]Bnode){
+
+	// -------------------------------------------------------------------------
+	// 1. Node already fits in one page
+	// -------------------------------------------------------------------------
+
+	if old.nbytes()<=BTREE_PAGE_SIZE{
+		return 1,[3]{old}
+	}
+
+	// -------------------------------------------------------------------------
+	// 2. First split
+	// -------------------------------------------------------------------------
+
+	// Left may need to be split again, so give it 2 pages of space.
+	left := BNode(make([]byte, 2*BTREE_PAGE_SIZE))
+
+	// Right should fit into one page after nodeSplit2.
+	right := BNode(make([]byte, BTREE_PAGE_SIZE))
+
+	nodeSplit2(old,left,right)
+
+	// -------------------------------------------------------------------------
+	// 3. Check whether the left side fits
+	// -------------------------------------------------------------------------
+
+	if left.nbytes()<=BTREE_PAGE_SIZE{
+		left = left[:BTREE_PAGE_SIZE]
+		return 2,[3]{left,right}
+	}
+
+	// -------------------------------------------------------------------------
+	// 4. Left is still too large -> split it again
+	// -------------------------------------------------------------------------
+
+	leftleft := BNode(make([]byte, BTREE_PAGE_SIZE))
+	middle := BNode(make([]byte, BTREE_PAGE_SIZE))
+
+	nodeSplit2(left,leftleft,middle)
+
+	// leftleft must fit because nodeSplit2 guarantees the right side fits
+	// and the remaining split is now small enough.
+	if leftleft.nbytes() > BTREE_PAGE_SIZE {
+		panic("left-left node is too large")
+	}
+
+	// -------------------------------------------------------------------------
+	// 5. Return three nodes
+	// -------------------------------------------------------------------------
+
+	return 3,[3]{leftleft,middle,right}
 }
