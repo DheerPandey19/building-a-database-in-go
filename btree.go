@@ -403,3 +403,64 @@ func leafInsertOrUpdate(new BNode,old BNode,key []byte,val []byte) {
         leafInsert(old, new, idx+1, key, val)
     }
 }
+
+// -----------------------------------------------------------------------------
+// Split an oversized node into two nodes
+// -----------------------------------------------------------------------------
+//
+// Splits old into left and right while making sure the right node fits
+// within a single 4KB page.
+//
+// We start by splitting the keys roughly in half, then move the split
+// position left or right depending on which side is too large.
+//
+
+func nodeSplit2(old BNode, left BNode, right BNode) {
+    if old.nkeys() < 2 {
+        panic("Cannot split a node with less than 2 keys")
+    }
+
+    // Start with the split in the middle.
+    nleft := old.nkeys() / 2
+
+    // Calculate the size of the left node.
+    leftBytes := func() uint16 {
+        return 4 + 8*nleft + 2*nleft + old.getOffset(nleft)
+    }
+
+    // If the left node is too large, move the split point left.
+    for leftBytes() > BTREE_PAGE_SIZE {
+        nleft--
+    }
+
+    if nleft < 1 {
+        panic("left node cannot fit")
+    }
+
+    // Calculate the size of the right node.
+    rightBytes := func() uint16 {
+        return old.nbytes() - leftBytes() + 4
+    }
+
+    // If the right node is too large, move the split point right.
+    for rightBytes() > BTREE_PAGE_SIZE {
+        nleft++
+    }
+
+    if nleft >= old.nkeys() {
+        panic("right node cannot fit")
+    }
+
+    // Number of keys in the right node.
+    nright := old.nkeys() - nleft
+
+    // Set headers.
+    left.setHeader(old.btype(), nleft)
+    right.setHeader(old.btype(), nright)
+
+    // Copy left half.
+    nodeAppendRange(left, old, 0, 0, nleft)
+
+    // Copy right half.
+    nodeAppendRange(right, old, 0, nleft, nright)
+}
