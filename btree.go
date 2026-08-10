@@ -390,3 +390,16 @@ func nodeLookupLE(node BNode,current[]byte) uint16{
 	}
 	return i-1
 }
+func leafInsertOrUpdate(new BNode,old BNode,key []byte,val []byte) {
+
+	//finding the index of the last key <= the given key
+    idx := nodeLookupLE(old, key)
+
+    if bytes.Equal(key, old.getKey(idx)) {
+        // Key already exists -> update its value.
+        leafUpdate(old, new, idx, key, val)
+    } else {
+        // Key doesn't exist -> insert after the last key <= key.
+        leafInsert(old, new, idx+1, key, val)
+    }
+}
