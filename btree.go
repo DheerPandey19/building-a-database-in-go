@@ -502,14 +502,14 @@ func nodeSplit2(old BNode, left BNode, right BNode) {
 // prevents the first split from producing two page-sized nodes.
 
 
-func nodeSplit3(old BNode)(uint16,[3]Bnode){
+func nodeSplit3(old BNode)(uint16,[3]BNode){
 
 	// -------------------------------------------------------------------------
 	// 1. Node already fits in one page
 	// -------------------------------------------------------------------------
 
 	if old.nbytes()<=BTREE_PAGE_SIZE{
-		return 1,[3]{old}
+		return 1,[3]BNode{old}
 	}
 
 	// -------------------------------------------------------------------------
@@ -530,7 +530,7 @@ func nodeSplit3(old BNode)(uint16,[3]Bnode){
 
 	if left.nbytes()<=BTREE_PAGE_SIZE{
 		left = left[:BTREE_PAGE_SIZE]
-		return 2,[3]{left,right}
+		return 2,[3]BNode{left,right}
 	}
 
 	// -------------------------------------------------------------------------
@@ -552,5 +552,5 @@ func nodeSplit3(old BNode)(uint16,[3]Bnode){
 	// 5. Return three nodes
 	// -------------------------------------------------------------------------
 
-	return 3,[3]{leftleft,middle,right}
+	return 3,[3]BNode{leftleft,middle,right}
 }
