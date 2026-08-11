@@ -76,4 +76,37 @@ func main() {
 
 	value = treeGet(&tree, []byte("apple"))
 	fmt.Println("apple =", string(value))
+
+	fmt.Println("\nTesting 1000 keys...")
+
+	for i := 0; i < 1000; i++ {
+		key := fmt.Sprintf("key-%04d", i)
+		val := fmt.Sprintf("value-%04d", i)
+
+		tree.Insert([]byte(key), []byte(val))
+	}
+
+	fmt.Println("Inserted 1000 keys.")
+
+	for i := 0; i < 1000; i++ {
+		key := fmt.Sprintf("key-%04d", i)
+		expected := fmt.Sprintf("value-%04d", i)
+
+		value := treeGet(&tree, []byte(key))
+
+		if value == nil {
+			panic("missing key: " + key)
+		}
+
+		if string(value) != expected {
+			panic(fmt.Sprintf(
+				"wrong value for %s: got %s, expected %s",
+				key,
+				string(value),
+				expected,
+			))
+		}
+	}
+
+	fmt.Println("All 1000 keys verified successfully!")
 }

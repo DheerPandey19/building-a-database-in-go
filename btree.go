@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 )
 // -----------------------------------------------------------------------------
 // Page Layout
@@ -525,6 +526,8 @@ func nodeSplit3(old BNode)(uint16,[3]BNode){
 		// // 
 		// // The node is logically one page, so return exactly one page. 
 		return 1, [3]BNode{old[:BTREE_PAGE_SIZE]} }
+
+		fmt.Println("SPLIT",old.nbytes(), "bytes")
 
 	// -------------------------------------------------------------------------
 	// 2. First split
