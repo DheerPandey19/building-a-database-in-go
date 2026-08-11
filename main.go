@@ -3,19 +3,77 @@ package main
 import "fmt"
 
 func main() {
+	// -------------------------------------------------------------------------
+	// Simple in-memory page manager
+	// -------------------------------------------------------------------------
 
-	node := BNode(make([]byte, BTREE_PAGE_SIZE))
+	pages := make(map[uint64][]byte)
+	var nextPage uint64 = 1
 
-    node.setHeader(BNODE_LEAF, 2)
+	tree := BTree{
+		get: func(ptr uint64) []byte {
+			return pages[ptr]
+		},
 
-    nodeAppendKV(node, 0, 0, []byte("k1"), []byte("hi"))
-    nodeAppendKV(node, 1, 0, []byte("k3"), []byte("hello"))
+		new: func(node []byte) uint64 {
+			ptr := nextPage
+			nextPage++
 
-    fmt.Println(string(node.getKey(0)))
-    fmt.Println(string(node.getVal(0)))
+			pages[ptr] = node
 
-    fmt.Println(string(node.getKey(1)))
-    fmt.Println(string(node.getVal(1)))
+			return ptr
+		},
 
-    fmt.Println("nbytes:", node.nbytes())
+		del: func(ptr uint64) {
+			delete(pages, ptr)
+		},
+	}
+
+	// -------------------------------------------------------------------------
+	// Basic inserts
+	// -------------------------------------------------------------------------
+
+	fmt.Println("Inserting keys...")
+
+	tree.Insert([]byte("apple"), []byte("red"))
+	tree.Insert([]byte("banana"), []byte("yellow"))
+	tree.Insert([]byte("cat"), []byte("animal"))
+
+	// -------------------------------------------------------------------------
+	// Basic gets
+	// -------------------------------------------------------------------------
+
+	fmt.Println("\nGetting values...")
+
+	value := treeGet(&tree, []byte("apple"))
+	fmt.Println("apple =", string(value))
+
+	value = treeGet(&tree, []byte("banana"))
+	fmt.Println("banana =", string(value))
+
+	value = treeGet(&tree, []byte("cat"))
+	fmt.Println("cat =", string(value))
+
+	// -------------------------------------------------------------------------
+	// Missing key
+	// -------------------------------------------------------------------------
+
+	value = treeGet(&tree, []byte("dog"))
+
+	if value == nil {
+		fmt.Println("dog = <not found>")
+	} else {
+		fmt.Println("dog =", string(value))
+	}
+
+	// -------------------------------------------------------------------------
+	// Update an existing key
+	// -------------------------------------------------------------------------
+
+	fmt.Println("\nUpdating apple...")
+
+	tree.Insert([]byte("apple"), []byte("green"))
+
+	value = treeGet(&tree, []byte("apple"))
+	fmt.Println("apple =", string(value))
 }

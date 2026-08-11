@@ -1,8 +1,9 @@
 package main
 
-import ("bytes",
-         "encoding/binary")
-
+import (
+	"bytes"
+	"encoding/binary"
+)
 // -----------------------------------------------------------------------------
 // Page Layout
 // -----------------------------------------------------------------------------
@@ -60,7 +61,20 @@ type BTree struct {
 	// Delete/deallocate a page.
 	del func(uint64)
 }
+// -----------------------------------------------------------------------------
+// KV Store
+// -----------------------------------------------------------------------------
+type KV struct{
 
+		// Database file path.
+		Path string
+
+		// Open file descriptor.
+		fd int
+
+		// B+Tree stored in the database.
+		tree BTree
+}
 
 // -----------------------------------------------------------------------------
 // Header
@@ -389,29 +403,26 @@ func leafUpdate(old BNode, new BNode, idx uint16, key []byte, value []byte) {
 //
 
 
-func nodeLookupLE(node BNode,current[]byte) uint16{
-	nkeys :=node.nkeys()
+func nodeLookupLE(node BNode, current []byte) uint16 {
+	nkeys := node.nkeys()
 
 	var i uint16
 
-	// 	bytes.Compare(a, b)
-	// Result	Meaning
-	// < 0	a < b
-	// 0	a == b
-	// > 0	a > b
-	for i:=0;i<nkeys;i++{
-		cmp := bytes.Compare(node.getKey(i),current)
+	for i = 0; i < nkeys; i++ {
+		cmp := bytes.Compare(node.getKey(i), current)
 
-		if cmp == 0{
+		if cmp == 0 {
 			return i
 		}
-		if cmp > 0{
-			return i-1
+
+		if cmp > 0 {
+			return i - 1
 		}
-		
 	}
-	return i-1
+
+	return i - 1
 }
+
 func leafInsertOrUpdate(new BNode,old BNode,key []byte,val []byte) {
 
 	//finding the index of the last key <= the given key
@@ -508,9 +519,12 @@ func nodeSplit3(old BNode)(uint16,[3]BNode){
 	// 1. Node already fits in one page
 	// -------------------------------------------------------------------------
 
-	if old.nbytes()<=BTREE_PAGE_SIZE{
-		return 1,[3]BNode{old}
-	}
+	if old.nbytes() <= BTREE_PAGE_SIZE { 
+		// old may be backed by a 2-page (8192 byte) buffer because 
+		// // treeInsert() creates temporary nodes with 2*BTREE_PAGE_SIZE. 
+		// // 
+		// // The node is logically one page, so return exactly one page. 
+		return 1, [3]BNode{old[:BTREE_PAGE_SIZE]} }
 
 	// -------------------------------------------------------------------------
 	// 2. First split
@@ -553,4 +567,260 @@ func nodeSplit3(old BNode)(uint16,[3]BNode){
 	// -------------------------------------------------------------------------
 
 	return 3,[3]BNode{leftleft,middle,right}
+}
+// -----------------------------------------------------------------------------
+// Replace one child with multiple children
+// -----------------------------------------------------------------------------
+//
+// The child at index idx in the old parent is replaced by the nodes in kids.
+//
+// Example:
+//
+// old parent:
+//
+// [A] [M] [Z]
+//      |
+//    child
+//
+// If child splits into:
+//
+// [M] and [T]
+//
+// the new parent becomes:
+//
+// [A] [M] [T] [Z]
+//
+// -----------------------------------------------------------------------------
+
+func nodeReplaceKidN(
+	tree *BTree,
+	new BNode,
+	old BNode,
+	idx uint16,
+	kids ...BNode,
+) {
+	// Number of new children replacing the old child.
+	inc := uint16(len(kids))
+
+	// We remove 1 old child and add inc new children.
+	new.setHeader(BNODE_NODE, old.nkeys()+inc-1)
+
+	// Copy everything before idx.
+	nodeAppendRange(
+		new,
+		old,
+		0,
+		0,
+		idx,
+	)
+
+	// Insert the new children.
+	for i, node := range kids {
+		nodeAppendKV(
+			new,
+			idx+uint16(i),
+			tree.new(node),
+			node.getKey(0),
+			nil,
+		)
+	}
+
+	// Copy everything after the old child.
+	nodeAppendRange(
+		new,
+		old,
+		idx+inc,
+		idx+1,
+		old.nkeys()-(idx+1),
+	)
+}
+func treeInsert(tree *BTree, node BNode, key []byte, val []byte) BNode {
+	// The new node can temporarily be larger than one page.
+	// It will be split later using nodeSplit3().
+	new := BNode(make([]byte, 2*BTREE_PAGE_SIZE))
+
+	// Find the last key <= key.
+	idx := nodeLookupLE(node, key)
+
+	switch node.btype() {
+
+	case BNODE_LEAF:
+		// We reached a leaf.
+		//
+		// If the key already exists, update its value.
+		// Otherwise, insert the new key after idx.
+
+		if bytes.Equal(key, node.getKey(idx)) {
+			leafUpdate(
+				node,
+				new,
+				idx,
+				key,
+				val,
+			)
+		} else {
+			leafInsert(
+				node,
+				new,
+				idx+1,
+				key,
+				val,
+			)
+		}
+
+	case BNODE_NODE:
+		// Internal node.
+		//
+		// idx tells us which child subtree contains the key.
+
+		kptr := node.getPointer(idx)
+
+		// Recursively insert into that child.
+		knode := treeInsert(
+			tree,
+			BNode(tree.get(kptr)),
+			key,
+			val,
+		)
+
+		// The child may now be too large.
+		// Split it into 1, 2, or 3 nodes.
+		nsplit, split := nodeSplit3(knode)
+
+		// The old child is no longer needed because this
+		// B+tree uses copy-on-write.
+		tree.del(kptr)
+
+		// Replace the old child with the newly created
+		// 1, 2, or 3 children.
+		nodeReplaceKidN(
+			tree,
+			new,
+			node,
+			idx,
+			split[:nsplit]...,
+		)
+
+	default:
+		panic("invalid BNode type")
+	}
+
+	return new
+}
+
+func treeGet(tree *BTree, key []byte) []byte {
+	if tree.root == 0 {
+		return nil
+	}
+
+	// Start at the root.
+	node := BNode(tree.get(tree.root))
+
+	for {
+		idx := nodeLookupLE(node, key)
+
+		switch node.btype() {
+
+		case BNODE_LEAF:
+			// We are at the leaf that should contain the key.
+
+			if bytes.Equal(node.getKey(idx), key) {
+				// Return the value associated with the key.
+				return node.getVal(idx)
+			}
+
+			// Key does not exist.
+			return nil
+
+		case BNODE_NODE:
+			// Internal node.
+			//
+			// idx tells us which child subtree to follow.
+			ptr := node.getPointer(idx)
+
+			node = BNode(tree.get(ptr))
+
+		default:
+			panic("invalid BNode type")
+		}
+	}
+}
+
+func (tree *BTree) Insert(key []byte, val []byte) {
+	// -------------------------------------------------------------------------
+	// Empty tree
+	// -------------------------------------------------------------------------
+
+	if tree.root == 0 {
+		// Create the first leaf node.
+		root := BNode(make([]byte, BTREE_PAGE_SIZE))
+
+		// The first key is the sentinel.
+		//
+		// This guarantees that nodeLookupLE() always has
+		// a valid key to return.
+		root.setHeader(BNODE_LEAF, 1)
+
+		nodeAppendKV(
+			root,
+			0,
+			0,
+			nil, // sentinel key
+			nil, // sentinel value
+		)
+
+		tree.root = tree.new(root)
+	}
+
+	// -------------------------------------------------------------------------
+	// Insert into the tree
+	// -------------------------------------------------------------------------
+
+	oldRoot := BNode(tree.get(tree.root))
+
+	newRoot := treeInsert(
+		tree,
+		oldRoot,
+		key,
+		val,
+	)
+
+	// -------------------------------------------------------------------------
+	// Split the root if necessary
+	// -------------------------------------------------------------------------
+
+	nsplit, split := nodeSplit3(newRoot)
+
+	if nsplit == 1 {
+		// Root still fits in one page.
+		tree.del(tree.root)
+
+		tree.root = tree.new(split[0])
+		return
+	}
+
+	// Root was split.
+	//
+	// We need to create a new internal root whose children
+	// are the split nodes.
+
+	root := BNode(make([]byte, BTREE_PAGE_SIZE))
+
+	root.setHeader(BNODE_NODE, nsplit)
+
+	for i := uint16(0); i < nsplit; i++ {
+		nodeAppendKV(
+			root,
+			i,
+			tree.new(split[i]),
+			split[i].getKey(0),
+			nil,
+		)
+	}
+
+	// The old root is no longer needed.
+	tree.del(tree.root)
+
+	// New internal root.
+	tree.root = tree.new(root)
 }
