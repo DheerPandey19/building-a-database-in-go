@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"syscall"
 )
 // -----------------------------------------------------------------------------
 // Page Layout
@@ -65,16 +66,36 @@ type BTree struct {
 // -----------------------------------------------------------------------------
 // KV Store
 // -----------------------------------------------------------------------------
+// KV represents the persistent key-value database.
+// It owns the database file and the B+Tree used to store the data.
 type KV struct{
 
+		// Path is the path to the database file on disk.
 		// Database file path.
 		Path string
 
 		// Open file descriptor.
+		// fd is the file descriptor for the opened database file.
+		// It is used for reading, writing, and syncing the file.
 		fd int
 
 		// B+Tree stored in the database.
 		tree BTree
+}
+
+// Open opens the database file, creating it if it does not exist.
+// The file is opened for both reading and writing.
+func (db *KV)Open() error{
+	fd,err :=syscall.Open(db.Path,syscall.O_RDWR|syscall.O_CREATE,0644,)
+
+	if err !=nil{
+		return err
+	}
+
+	// Store the file descriptor so the database can use it
+	// for subsequent page I/O operations.
+	db.fd=fd
+	return nil
 }
 
 // -----------------------------------------------------------------------------
