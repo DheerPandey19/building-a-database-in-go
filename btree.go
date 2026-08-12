@@ -137,8 +137,41 @@ func extendMmap(db *KV, size int) error {
 
 	return nil
 }
+// pageRead returns the 4KB database page identified by ptr.
+//
+// ptr is a page number, not a byte offset.
+// For example:
+//   ptr = 0 → first page
+//   ptr = 1 → second page
+//   ptr = 2 → third page
 
-// Open opens the database file, creating it if it does not exist.
+func (db *KV) pageRead(ptr uint64) []byte{
+
+	start:=uint64(0)
+	for _,chunk := range db.mmap.chunks{
+
+		// How many 4KB pages are contained in this mmap chunk?
+		end := start + uint64(len(chunk))/BTREE_PAGE_SIZE
+
+		//If ptr is inside this chunk , return this page
+		//position within the chunks
+
+		if ptr < end{
+			offset := BTREE_PAGE_SIZE * (ptr - start)
+
+			return chunk[offset : offset + BTREE_PAGE_SIZE]
+		}
+
+		// This page is not in this chunk.
+		// Move to the next chunk.
+		start=end
+	}
+
+	panic("bad pointer")
+
+}
+
+// Open opens the database file, creating it if it does not exist
 // The file is opened for both reading and writing.
 func (db *KV)Open() error{
 	fd,err :=syscall.Open(db.Path,syscall.O_RDWR|os.O_CREATE,0644,)
