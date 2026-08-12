@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"syscall"
+	"os"
 )
 // -----------------------------------------------------------------------------
 // Page Layout
@@ -33,6 +34,7 @@ const (
 
 const (
 	BTREE_PAGE_SIZE = 4096
+	DB_META_SIZE = BTREE_PAGE_SIZE // Size of the database metadata page.
 )
 
 // -----------------------------------------------------------------------------
@@ -81,12 +83,65 @@ type KV struct{
 
 		// B+Tree stored in the database.
 		tree BTree
+
+		// mmap information
+		mmap struct {
+			total  int
+			chunks [][]byte
+		}
+
+		// page allocation information
+		page struct {
+			flushed uint64
+			temp    [][]byte
+		}
+}
+func extendMmap(db *KV, size int) error {
+	// The existing memory mappings are already large enough.
+	if size <= db.mmap.total {
+		return nil
+	}
+
+	// Allocate 64 MB for the first mapping.
+	// After that, grow the mapping exponentially.
+	alloc := db.mmap.total
+
+	if alloc == 0 {
+		alloc = 64 << 20 // 64 MB
+	} else {
+		alloc *= 2
+	}
+
+	// If the requested size is larger than the allocation,
+	// keep doubling until the new mapping is large enough.
+	for db.mmap.total+alloc < size {
+		alloc *= 2
+	}
+
+	// Map this portion of the database file into memory.
+	// The offset starts immediately after all existing mappings.
+	chunk, err := syscall.Mmap(
+		db.fd,
+		int64(db.mmap.total),
+		alloc,
+		syscall.PROT_READ,
+		syscall.MAP_SHARED,
+	)
+	if err != nil {
+		return fmt.Errorf("mmap: %w", err)
+	}
+
+	// Remember the new mapping.
+	db.mmap.total += alloc
+	db.mmap.chunks = append(db.mmap.chunks, chunk)
+
+	return nil
 }
 
 // Open opens the database file, creating it if it does not exist.
 // The file is opened for both reading and writing.
 func (db *KV)Open() error{
-	fd,err :=syscall.Open(db.Path,syscall.O_RDWR|syscall.O_CREATE,0644,)
+	fd,err :=syscall.Open(db.Path,syscall.O_RDWR|os.O_CREATE,0644,)
 
 	if err !=nil{
 		return err
