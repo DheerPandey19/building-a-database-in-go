@@ -40,4 +40,22 @@ func main() {
 	page := db.pageRead(2)
 
 	fmt.Println("Page size:", len(page))
+
+	// -------------------------------------------------------------------------
+	// Test pageAppend
+	// -------------------------------------------------------------------------
+
+	node1 := make([]byte, BTREE_PAGE_SIZE)
+
+	ptr1 := db.pageAppend(node1)
+
+	fmt.Println("First page:", ptr1)
+	fmt.Println("Temporary pages:", len(db.page.temp))
+
+	node2 := make([]byte, BTREE_PAGE_SIZE)
+
+	ptr2 := db.pageAppend(node2)
+
+	fmt.Println("Second page:", ptr2)
+	fmt.Println("Temporary pages:", len(db.page.temp))
 }
