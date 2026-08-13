@@ -171,6 +171,25 @@ func (db *KV) pageRead(ptr uint64) []byte{
 
 }
 
+
+// pageAppend temporarily stores a newly created B+Tree page
+// and returns the page number assigned to it.
+//
+// The page is not written to disk yet.
+// It will be written later by writePages().
+
+func(db *KV)pageAppend(node []byte)uint64{
+	// New pages are appended after all pages that have
+	// already been written to the database file
+	ptr:=db.page.flushed + uint64(len(db.page.temp))
+
+	// Keep the new page in memory until it is flushed to disk.
+	db.page.temp=append(db.page.temp,node)
+
+	return ptr
+}
+
+
 // Open opens the database file, creating it if it does not exist
 // The file is opened for both reading and writing.
 func (db *KV)Open() error{
