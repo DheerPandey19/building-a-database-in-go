@@ -188,7 +188,39 @@ func(db *KV)pageAppend(node []byte)uint64{
 
 	return ptr
 }
+// writePages writes all newly created pages in db.page.temp
+// to the database file.
+//
+// The pages are written starting at db.page.flushed.
+// After they are written, they are considered persistent
+// pages and are removed from the temporary list.
+func writePages(db *KV) error {
+	// Calculate the total size of the database after
+	// adding all temporary pages.
+	size := (int(db.page.flushed) + len(db.page.temp)) * BTREE_PAGE_SIZE
 
+	// Make sure the mmap is large enough to cover
+	// the pages we are about to write.
+	if err := extendMmap(db, size); err != nil {
+		return err
+	}
+
+	// Calculate the byte offset where the new pages begin.
+	offset := int64(db.page.flushed * BTREE_PAGE_SIZE)
+
+	// Write all temporary pages to the database file.
+	if _, err := syscall.Pwritev(db.fd, db.page.temp, offset); err != nil {
+		return err
+	}
+
+	// The temporary pages have now been written to disk.
+	db.page.flushed += uint64(len(db.page.temp))
+
+	// Clear the temporary pages.
+	db.page.temp = db.page.temp[:0]
+
+	return nil
+}
 
 // Open opens the database file, creating it if it does not exist
 // The file is opened for both reading and writing.
