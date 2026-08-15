@@ -260,6 +260,8 @@ func writePages(db *KV) error {
 //   - bytes 24-31: number of pages already written
 //
 // The remaining bytes are unused for now.
+
+
 func saveMeta(db *KV)[]byte{
 	var data[BTREE_PAGE_SIZE]byte
 
@@ -274,6 +276,17 @@ func saveMeta(db *KV)[]byte{
 	binary.LittleEndian.PutUint64(data[24:],db.page.flushed)
 
 	return data[:]
+}
+
+// loadMeta loads the database state from the meta page.
+//
+// It reads the B+Tree root page number and the number
+// of pages that have already been written.
+func loadMeta(db* KV,data []byte){
+	db.tree.root=binary.LittleEndian.Uint64(data[16:24])
+
+	// Read the number of flushed pages.
+	db.page.flushed=binary.LittleEndian.Uint64(data[24:32])
 }
 
 // Open opens the database file, creating it if it does not exist
