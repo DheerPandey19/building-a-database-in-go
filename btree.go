@@ -35,6 +35,7 @@ const (
 const (
 	BTREE_PAGE_SIZE = 4096
 	DB_META_SIZE = BTREE_PAGE_SIZE // Size of the database metadata page.
+	DB_SIG = "BuildYourOwnDB06"
 )
 
 // -----------------------------------------------------------------------------
@@ -209,6 +210,7 @@ func writePages(db *KV) error {
 	offset := int64(db.page.flushed * BTREE_PAGE_SIZE)
 
 	// Write all temporary pages to the database file.
+	//Pwritev writes multiple byte slices to the file in one operation.
 	if _, err := syscall.Pwritev(db.fd, db.page.temp, offset); err != nil {
 		return err
 	}
@@ -220,6 +222,58 @@ func writePages(db *KV) error {
 	db.page.temp = db.page.temp[:0]
 
 	return nil
+}
+
+// database.db
+// │
+// ├── Page 0 — META PAGE
+// │   ┌───────────────────────────────┐
+// │   │ bytes 0-15   → DB signature   │
+// │   │ "BuildYourOwnDB06"            │
+// │   │                               │
+// │   │ bytes 16-23  → root pointer   │
+// │   │                               │
+// │   │ bytes 24-31  → page count     │
+// │   │                               │
+// │   │ bytes 32-4095 → unused        │
+// │   └───────────────────────────────┘
+// │
+// ├── Page 1 — B+Tree node
+// │   ┌───────────────────────────────┐
+// │   │ BNode data                    │
+// │   └───────────────────────────────┘
+// │
+// ├── Page 2 — B+Tree node
+// │   ┌───────────────────────────────┐
+// │   │ BNode data                    │
+// │   └───────────────────────────────┘
+// │
+// ├── Page 3 — B+Tree node
+// │
+// └── ...
+
+// saveMeta creates the database meta page.
+//
+// The meta page is stored at page 0 and contains:
+//   - bytes 0-15:  database signature
+//   - bytes 16-23: current B+Tree root page number
+//   - bytes 24-31: number of pages already written
+//
+// The remaining bytes are unused for now.
+func saveMeta(db *KV)[]byte{
+	var data[BTREE_PAGE_SIZE]byte
+
+	// Identify this file as a BuildYourOwnDB database.
+	copy(data[:16], []byte(DB_SIG))
+
+	// Store the current B+Tree root page number.
+	binary.LittleEndian.PutUint64(data[16:], db.tree.root)
+
+	// Store the number of pages that have already
+	// been written to the database
+	binary.LittleEndian.PutUint64(data[24:],db.page.flushed)
+
+	return data[:]
 }
 
 // Open opens the database file, creating it if it does not exist
