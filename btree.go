@@ -7,10 +7,8 @@ import (
 	"syscall"
 	"os"
 )
-// you're essentially telling the OS:
 
-// "Take all the changes I've made to this file and make sure they're actually persisted to the storage device before you tell me this succeeded."
-// syscall.Fsync(db.fd)
+//syscall.Fsync(db.fd)
 // -----------------------------------------------------------------------------
 // Page Layout
 // -----------------------------------------------------------------------------
@@ -150,30 +148,34 @@ func extendMmap(db *KV, size int) error {
 //   ptr = 1 → second page
 //   ptr = 2 → third page
 
-func (db *KV) pageRead(ptr uint64) []byte{
+func (db *KV) pageRead(ptr uint64) []byte {
 
-	start:=uint64(0)
-	for _,chunk := range db.mmap.chunks{
+	// Check temporary pages first.
+	if ptr >= db.page.flushed {
+		idx := ptr - db.page.flushed
 
-		// How many 4KB pages are contained in this mmap chunk?
+		if idx < uint64(len(db.page.temp)) {
+			return db.page.temp[idx]
+		}
+	}
+
+	// Existing mmap logic...
+	start := uint64(0)
+
+	for _, chunk := range db.mmap.chunks {
+
 		end := start + uint64(len(chunk))/BTREE_PAGE_SIZE
 
-		//If ptr is inside this chunk , return this page
-		//position within the chunks
-
-		if ptr < end{
+		if ptr < end {
 			offset := BTREE_PAGE_SIZE * (ptr - start)
 
-			return chunk[offset : offset + BTREE_PAGE_SIZE]
+			return chunk[offset : offset+BTREE_PAGE_SIZE]
 		}
 
-		// This page is not in this chunk.
-		// Move to the next chunk.
-		start=end
+		start = end
 	}
 
 	panic("bad pointer")
-
 }
 
 
@@ -199,6 +201,8 @@ func(db *KV)pageAppend(node []byte)uint64{
 // The pages are written starting at db.page.flushed.
 // After they are written, they are considered persistent
 // pages and are removed from the temporary list.
+
+
 func writePages(db *KV) error {
 	// Calculate the total size of the database after
 	// adding all temporary pages.
@@ -426,17 +430,14 @@ func updateFile(db *KV) error {
 //                └── loadMeta()
 //                       ├── tree.root
 //                       └── page.flushed
-func (db *KV)Open() error{
-	fd, err := syscall.Open(db.Path,syscall.O_RDWR|os.O_CREATE,0644)
-
+func (db *KV) Open() error {
+	fd, err := syscall.Open(db.Path, syscall.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
 		return err
 	}
 
-	// Store the file descriptor.
 	db.fd = fd
 
-	// Get the current size of the database file.
 	var stat syscall.Stat_t
 	if err := syscall.Fstat(db.fd, &stat); err != nil {
 		syscall.Close(db.fd)
@@ -445,22 +446,47 @@ func (db *KV)Open() error{
 
 	fileSize := stat.Size
 
-	// Make sure the mmap is large enough to access
-	// the existing database pages.
 	if err := extendMmap(db, int(fileSize)); err != nil {
 		syscall.Close(db.fd)
 		return err
 	}
 
-	// Load the root pointer and page count.
 	if err := readRoot(db, fileSize); err != nil {
 		syscall.Close(db.fd)
 		return err
 	}
 
+	// Connect B+Tree to page manager.
+	db.tree.get = db.pageRead
+	db.tree.new = db.pageAppend
+	db.tree.del = func(uint64) {}
+
 	return nil
 }
 
+func (db *KV) Set(key []byte, val []byte) error {
+	db.tree.Insert(key, val)
+	return updateFile(db)
+}
+
+func (tree *BTree) Get(key []byte) []byte {
+	return treeGet(tree, key)
+}
+
+func (db *KV) Get(key []byte) []byte {
+	return db.tree.Get(key)
+}
+
+func createRoot(db *KV) {
+	// Create an empty leaf node.
+	root := make([]byte, BTREE_PAGE_SIZE)
+
+	// Mark it as a leaf node with zero keys.
+	BNode(root).setHeader(BNODE_LEAF, 0)
+
+	// Allocate page 1 for the root.
+	db.tree.root = db.tree.new(root)
+}
 // -----------------------------------------------------------------------------
 // Header
 // -----------------------------------------------------------------------------
