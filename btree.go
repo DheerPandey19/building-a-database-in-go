@@ -211,10 +211,18 @@ func writePages(db *KV) error {
 
 	// Write all temporary pages to the database file.
 	//Pwritev writes multiple byte slices to the file in one operation.
-	if _, err := syscall.Pwritev(db.fd, db.page.temp, offset); err != nil {
-		return err
+	for _, page := range db.page.temp {
+		n, err := syscall.Pwrite(db.fd, page, offset)
+		if err != nil {
+			return err
+		}
+	
+		if n != len(page) {
+			return fmt.Errorf("short write: wrote %d of %d bytes", n, len(page))
+		}
+	
+		offset += int64(len(page))
 	}
-
 	// The temporary pages have now been written to disk.
 	db.page.flushed += uint64(len(db.page.temp))
 
@@ -223,6 +231,33 @@ func writePages(db *KV) error {
 
 	return nil
 }
+// -----------------------------------------------------------------------------
+// Read root
+// -----------------------------------------------------------------------------
+	// readRoot loads the database root information from the meta page.
+	//
+	// If the database file is empty, page 0 is reserved for the
+	// meta page. Otherwise, the existing meta page is loaded.
+
+func readRoot(db *KV, filesize int64)error{
+	if filesize == 0{
+		// Reserve page 0 for the meta page.
+		// B+Tree pages will start from page 1.
+		db.page.flushed = 1
+		return nil
+	}
+
+	// The database already contains a meta page.
+	// The first mmap chunk contains page 0.
+	data := db.mmap.chunks[0]
+
+	// Load the root pointer and page count
+	// from the meta page.
+	loadMeta(db,data)
+
+	return nil
+}
+
 
 // database.db
 // │
@@ -289,18 +324,58 @@ func loadMeta(db* KV,data []byte){
 	db.page.flushed=binary.LittleEndian.Uint64(data[24:32])
 }
 
-// Open opens the database file, creating it if it does not exist
-// The file is opened for both reading and writing.
+// Open()
+//  │
+//  ├── syscall.Open()
+//  │      └── opens/creates database.db
+//  │
+//  ├── Fstat()
+//  │      └── gets actual file size
+//  │
+//  ├── extendMmap()
+//  │      └── maps existing file into memory
+//  │
+//  └── readRoot()
+//         │
+//         ├── fileSize == 0
+//         │      └── flushed = 1
+//         │
+//         └── fileSize > 0
+//                └── loadMeta()
+//                       ├── tree.root
+//                       └── page.flushed
 func (db *KV)Open() error{
-	fd,err :=syscall.Open(db.Path,syscall.O_RDWR|os.O_CREATE,0644,)
+	fd, err := syscall.Open(db.Path,syscall.O_RDWR|os.O_CREATE,0644)
 
-	if err !=nil{
+	if err != nil {
 		return err
 	}
 
-	// Store the file descriptor so the database can use it
-	// for subsequent page I/O operations.
-	db.fd=fd
+	// Store the file descriptor.
+	db.fd = fd
+
+	// Get the current size of the database file.
+	var stat syscall.Stat_t
+	if err := syscall.Fstat(db.fd, &stat); err != nil {
+		syscall.Close(db.fd)
+		return err
+	}
+
+	fileSize := stat.Size
+
+	// Make sure the mmap is large enough to access
+	// the existing database pages.
+	if err := extendMmap(db, int(fileSize)); err != nil {
+		syscall.Close(db.fd)
+		return err
+	}
+
+	// Load the root pointer and page count.
+	if err := readRoot(db, fileSize); err != nil {
+		syscall.Close(db.fd)
+		return err
+	}
+
 	return nil
 }
 
