@@ -7,6 +7,10 @@ import (
 	"syscall"
 	"os"
 )
+// you're essentially telling the OS:
+
+// "Take all the changes I've made to this file and make sure they're actually persisted to the storage device before you tell me this succeeded."
+// syscall.Fsync(db.fd)
 // -----------------------------------------------------------------------------
 // Page Layout
 // -----------------------------------------------------------------------------
@@ -251,6 +255,12 @@ func readRoot(db *KV, filesize int64)error{
 	// The first mmap chunk contains page 0.
 	data := db.mmap.chunks[0]
 
+	// Verify that this is actually our database format.
+	if string(data[:16]) != DB_SIG {
+		return fmt.Errorf("bad database file")
+	}
+
+
 	// Load the root pointer and page count
 	// from the meta page.
 	loadMeta(db,data)
@@ -313,6 +323,57 @@ func saveMeta(db *KV)[]byte{
 	return data[:]
 }
 
+// updateRoot writes the current database metadata to page 0.
+//
+// Page 0 contains:
+//   - database signature
+//   - B+Tree root pointer
+//   - number of flushed pages
+
+// saveMeta()
+//     ↓
+// creates 4096-byte buffer
+//     ↓
+// ┌─────────────────────────────┐
+// │ BuildYourOwnDB06            │ 0-15
+// │ root pointer                │ 16-23
+// │ flushed page count          │ 24-31
+// │ unused                      │ 32-4095
+// └─────────────────────────────┘
+//     ↓
+// updateRoot()
+//     ↓
+// Pwrite(..., offset = 0)
+//     ↓
+// database.db
+// ┌─────────────────────────────┐
+// │         META PAGE           │ ← page 0
+
+
+// └─────────────────────────────┘
+func updateRoot(db *KV) error {
+	// Create the updated meta page in memory.
+	data := saveMeta(db)
+
+	// Write the meta page at byte offset 0.
+	// Offset 0 corresponds to page 0.
+	n, err := syscall.Pwrite(db.fd, data, 0)
+	if err != nil {
+		return fmt.Errorf("write meta page: %w", err)
+	}
+
+	// Make sure the entire meta page was written.
+	if n != len(data) {
+		return fmt.Errorf(
+			"short write: wrote %d of %d bytes",
+			n,
+			len(data),
+		)
+	}
+
+	return nil
+}
+
 // loadMeta loads the database state from the meta page.
 //
 // It reads the B+Tree root page number and the number
@@ -322,6 +383,27 @@ func loadMeta(db* KV,data []byte){
 
 	// Read the number of flushed pages.
 	db.page.flushed=binary.LittleEndian.Uint64(data[24:32])
+}
+
+func updateFile(db *KV) error {
+    // 1. Write new B+Tree pages.
+    if err := writePages(db); err != nil {
+        return err
+    }
+
+    // 2. Make sure those pages are durable
+    // before changing the root pointer.
+    if err := syscall.Fsync(db.fd); err != nil {
+        return err
+    }
+
+    // 3. Update the root pointer.
+    if err := updateRoot(db); err != nil {
+        return err
+    }
+
+    // 4. Make the updated root durable.
+    return syscall.Fsync(db.fd)
 }
 
 // Open()
