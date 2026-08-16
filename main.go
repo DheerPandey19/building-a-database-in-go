@@ -7,7 +7,7 @@ import (
 
 func main() {
 	// ---------------------------------------------------------
-	// Open database
+	// FIRST OPEN
 	// ---------------------------------------------------------
 
 	db := KV{
@@ -41,30 +41,50 @@ func main() {
 	fmt.Println("Temporary pages:", len(db.page.temp))
 
 	// ---------------------------------------------------------
-	// Read the value back
+	// Read while database is open
 	// ---------------------------------------------------------
 
 	val := db.Get([]byte("apple"))
-
-	fmt.Println("Value for apple:", string(val))
-
-	// ---------------------------------------------------------
-	// Try a key that doesn't exist
-	// ---------------------------------------------------------
-
-	val = db.Get([]byte("banana"))
-
-	if val == nil {
-		fmt.Println("banana not found")
-	} else {
-		fmt.Println("Value for banana:", string(val))
-	}
+	fmt.Println("Value before closing:", string(val))
 
 	// ---------------------------------------------------------
-	// Close database
+	// Close first database
 	// ---------------------------------------------------------
 
 	syscall.Close(db.fd)
 
 	fmt.Println("Database closed")
+
+	// ---------------------------------------------------------
+	// SECOND OPEN
+	// ---------------------------------------------------------
+
+	db2 := KV{
+		Path: "database.db",
+	}
+
+	err = db2.Open()
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Println("Database reopened")
+	fmt.Println("Loaded root:", db2.tree.root)
+	fmt.Println("Loaded flushed pages:", db2.page.flushed)
+
+	// ---------------------------------------------------------
+	// Read after reopening
+	// ---------------------------------------------------------
+
+	val = db2.Get([]byte("apple"))
+
+	fmt.Println("Value after reopening:", string(val))
+
+	// ---------------------------------------------------------
+	// Close second database
+	// ---------------------------------------------------------
+
+	syscall.Close(db2.fd)
+
+	fmt.Println("Database closed again")
 }
