@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"syscall"
 	"os"
+	"syscall"
 )
 
 //syscall.Fsync(db.fd)
@@ -36,8 +36,8 @@ const (
 
 const (
 	BTREE_PAGE_SIZE = 4096
-	DB_META_SIZE = BTREE_PAGE_SIZE // Size of the database metadata page.
-	DB_SIG = "BuildYourOwnDB06"
+	DB_META_SIZE    = BTREE_PAGE_SIZE // Size of the database metadata page.
+	DB_SIG          = "BuildYourOwnDB06"
 )
 
 // -----------------------------------------------------------------------------
@@ -68,37 +68,39 @@ type BTree struct {
 	// Delete/deallocate a page.
 	del func(uint64)
 }
+
 // -----------------------------------------------------------------------------
 // KV Store
 // -----------------------------------------------------------------------------
 // KV represents the persistent key-value database.
 // It owns the database file and the B+Tree used to store the data.
-type KV struct{
+type KV struct {
 
-		// Path is the path to the database file on disk.
-		// Database file path.
-		Path string
+	// Path is the path to the database file on disk.
+	// Database file path.
+	Path string
 
-		// Open file descriptor.
-		// fd is the file descriptor for the opened database file.
-		// It is used for reading, writing, and syncing the file.
-		fd int
+	// Open file descriptor.
+	// fd is the file descriptor for the opened database file.
+	// It is used for reading, writing, and syncing the file.
+	fd int
 
-		// B+Tree stored in the database.
-		tree BTree
+	// B+Tree stored in the database.
+	tree BTree
 
-		// mmap information
-		mmap struct {
-			total  int
-			chunks [][]byte
-		}
+	// mmap information
+	mmap struct {
+		total  int
+		chunks [][]byte
+	}
 
-		// page allocation information
-		page struct {
-			flushed uint64
-			temp    [][]byte
-		}
+	// page allocation information
+	page struct {
+		flushed uint64
+		temp    [][]byte
+	}
 }
+
 func extendMmap(db *KV, size int) error {
 	// The existing memory mappings are already large enough.
 	if size <= db.mmap.total {
@@ -140,6 +142,7 @@ func extendMmap(db *KV, size int) error {
 
 	return nil
 }
+
 // pageRead returns the 4KB database page identified by ptr.
 //
 // ptr is a page number, not a byte offset.
@@ -178,30 +181,29 @@ func (db *KV) pageRead(ptr uint64) []byte {
 	panic("bad pointer")
 }
 
-
 // pageAppend temporarily stores a newly created B+Tree page
 // and returns the page number assigned to it.
 //
 // The page is not written to disk yet.
 // It will be written later by writePages().
 
-func(db *KV)pageAppend(node []byte)uint64{
+func (db *KV) pageAppend(node []byte) uint64 {
 	// New pages are appended after all pages that have
 	// already been written to the database file
-	ptr:=db.page.flushed + uint64(len(db.page.temp))
+	ptr := db.page.flushed + uint64(len(db.page.temp))
 
 	// Keep the new page in memory until it is flushed to disk.
-	db.page.temp=append(db.page.temp,node)
+	db.page.temp = append(db.page.temp, node)
 
 	return ptr
 }
+
 // writePages writes all newly created pages in db.page.temp
 // to the database file.
 //
 // The pages are written starting at db.page.flushed.
 // After they are written, they are considered persistent
 // pages and are removed from the temporary list.
-
 
 func writePages(db *KV) error {
 	// Calculate the total size of the database after
@@ -224,11 +226,11 @@ func writePages(db *KV) error {
 		if err != nil {
 			return err
 		}
-	
+
 		if n != len(page) {
 			return fmt.Errorf("short write: wrote %d of %d bytes", n, len(page))
 		}
-	
+
 		offset += int64(len(page))
 	}
 	// The temporary pages have now been written to disk.
@@ -239,16 +241,17 @@ func writePages(db *KV) error {
 
 	return nil
 }
+
 // -----------------------------------------------------------------------------
 // Read root
 // -----------------------------------------------------------------------------
-	// readRoot loads the database root information from the meta page.
-	//
-	// If the database file is empty, page 0 is reserved for the
-	// meta page. Otherwise, the existing meta page is loaded.
+// readRoot loads the database root information from the meta page.
+//
+// If the database file is empty, page 0 is reserved for the
+// meta page. Otherwise, the existing meta page is loaded.
 
-func readRoot(db *KV, filesize int64)error{
-	if filesize == 0{
+func readRoot(db *KV, filesize int64) error {
+	if filesize == 0 {
 		// Reserve page 0 for the meta page.
 		// B+Tree pages will start from page 1.
 		db.page.flushed = 1
@@ -264,14 +267,12 @@ func readRoot(db *KV, filesize int64)error{
 		return fmt.Errorf("bad database file")
 	}
 
-
 	// Load the root pointer and page count
 	// from the meta page.
-	loadMeta(db,data)
+	loadMeta(db, data)
 
 	return nil
 }
-
 
 // database.db
 // │
@@ -310,9 +311,8 @@ func readRoot(db *KV, filesize int64)error{
 //
 // The remaining bytes are unused for now.
 
-
-func saveMeta(db *KV)[]byte{
-	var data[BTREE_PAGE_SIZE]byte
+func saveMeta(db *KV) []byte {
+	var data [BTREE_PAGE_SIZE]byte
 
 	// Identify this file as a BuildYourOwnDB database.
 	copy(data[:16], []byte(DB_SIG))
@@ -322,7 +322,7 @@ func saveMeta(db *KV)[]byte{
 
 	// Store the number of pages that have already
 	// been written to the database
-	binary.LittleEndian.PutUint64(data[24:],db.page.flushed)
+	binary.LittleEndian.PutUint64(data[24:], db.page.flushed)
 
 	return data[:]
 }
@@ -353,7 +353,6 @@ func saveMeta(db *KV)[]byte{
 // ┌─────────────────────────────┐
 // │         META PAGE           │ ← page 0
 
-
 // └─────────────────────────────┘
 func updateRoot(db *KV) error {
 	// Create the updated meta page in memory.
@@ -382,32 +381,32 @@ func updateRoot(db *KV) error {
 //
 // It reads the B+Tree root page number and the number
 // of pages that have already been written.
-func loadMeta(db* KV,data []byte){
-	db.tree.root=binary.LittleEndian.Uint64(data[16:24])
+func loadMeta(db *KV, data []byte) {
+	db.tree.root = binary.LittleEndian.Uint64(data[16:24])
 
 	// Read the number of flushed pages.
-	db.page.flushed=binary.LittleEndian.Uint64(data[24:32])
+	db.page.flushed = binary.LittleEndian.Uint64(data[24:32])
 }
 
 func updateFile(db *KV) error {
-    // 1. Write new B+Tree pages.
-    if err := writePages(db); err != nil {
-        return err
-    }
+	// 1. Write new B+Tree pages.
+	if err := writePages(db); err != nil {
+		return err
+	}
 
-    // 2. Make sure those pages are durable
-    // before changing the root pointer.
-    if err := syscall.Fsync(db.fd); err != nil {
-        return err
-    }
+	// 2. Make sure those pages are durable
+	// before changing the root pointer.
+	if err := syscall.Fsync(db.fd); err != nil {
+		return err
+	}
 
-    // 3. Update the root pointer.
-    if err := updateRoot(db); err != nil {
-        return err
-    }
+	// 3. Update the root pointer.
+	if err := updateRoot(db); err != nil {
+		return err
+	}
 
-    // 4. Make the updated root durable.
-    return syscall.Fsync(db.fd)
+	// 4. Make the updated root durable.
+	return syscall.Fsync(db.fd)
 }
 
 // Open()
@@ -465,8 +464,15 @@ func (db *KV) Open() error {
 }
 
 func (db *KV) Set(key []byte, val []byte) error {
+	// Save the current in-memory database state.
+	// We can restore this if the update fails.
+	meta := saveMeta(db)
+
+	// Insert the key/value into the B+Tree.
 	db.tree.Insert(key, val)
-	return updateFile(db)
+
+	// Persist the new version.
+	return updateOrRevert(db, meta)
 }
 
 func (tree *BTree) Get(key []byte) []byte {
@@ -477,8 +483,22 @@ func (db *KV) Get(key []byte) []byte {
 	return db.tree.Get(key)
 }
 
+func updateOrRevert(db *KV, meta []byte) error {
+
+	err := updateFile(db)
+
+	if err != nil {
+
+		//we restore the old state
+		loadMeta(db, meta)
+		db.page.temp = db.page.temp[:0]
+	}
+
+	return err
+}
+
 func createRoot(db *KV) {
-	// Create an empty leaf node.
+	// Create an empty leaf node.m
 	root := make([]byte, BTREE_PAGE_SIZE)
 
 	// Mark it as a leaf node with zero keys.
@@ -487,6 +507,7 @@ func createRoot(db *KV) {
 	// Allocate page 1 for the root.
 	db.tree.root = db.tree.new(root)
 }
+
 // -----------------------------------------------------------------------------
 // Header
 // -----------------------------------------------------------------------------
@@ -632,7 +653,6 @@ func (node BNode) getVal(idx uint16) []byte {
 	klen := binary.LittleEndian.Uint16(node[pos:])
 	vlen := binary.LittleEndian.Uint16(node[pos+2:])
 
-
 	// Skip:
 	//   4 bytes -> key_size + val_size
 	//   klen    -> key bytes
@@ -647,11 +667,8 @@ func (node BNode) nbytes() uint16 {
 
 	//last one's offset points to end
 
-	
 	return 4 + 8*node.nkeys() + 2*node.nkeys() + node.getOffset(node.nkeys())
 }
-
-
 
 // -----------------------------------------------------------------------------
 // Node Construction
@@ -772,29 +789,29 @@ func nodeAppendRange(
 //
 
 func leafInsert(old BNode, new BNode, idx uint16, key []byte, value []byte) {
-    new.setHeader(BNODE_LEAF, old.nkeys()+1)
+	new.setHeader(BNODE_LEAF, old.nkeys()+1)
 
-    // Copy KVs before the insertion point.
-    nodeAppendRange(new, old, 0, 0, idx)
+	// Copy KVs before the insertion point.
+	nodeAppendRange(new, old, 0, 0, idx)
 
-    // Insert the new KV at idx.
-    nodeAppendKV(new, idx, 0, key, value)
+	// Insert the new KV at idx.
+	nodeAppendKV(new, idx, 0, key, value)
 
-    // Copy the remaining KVs, shifted one position to the right.
-    nodeAppendRange(new, old, idx+1, idx, old.nkeys()-idx)
+	// Copy the remaining KVs, shifted one position to the right.
+	nodeAppendRange(new, old, idx+1, idx, old.nkeys()-idx)
 }
 
 func leafUpdate(old BNode, new BNode, idx uint16, key []byte, value []byte) {
-    new.setHeader(BNODE_LEAF, old.nkeys())
+	new.setHeader(BNODE_LEAF, old.nkeys())
 
-    // Copy KVs before the update position.
-    nodeAppendRange(new, old, 0, 0, idx)
+	// Copy KVs before the update position.
+	nodeAppendRange(new, old, 0, 0, idx)
 
-    // Replace the existing KV at idx.
-    nodeAppendKV(new, idx, 0, key, value)
+	// Replace the existing KV at idx.
+	nodeAppendKV(new, idx, 0, key, value)
 
-    // Copy the remaining KVs without shifting them.
-    nodeAppendRange(new, old, idx+1, idx+1, old.nkeys()-(idx+1))
+	// Copy the remaining KVs without shifting them.
+	nodeAppendRange(new, old, idx+1, idx+1, old.nkeys()-(idx+1))
 }
 
 // -----------------------------------------------------------------------------
@@ -812,7 +829,6 @@ func leafUpdate(old BNode, new BNode, idx uint16, key []byte, value []byte) {
 // lookup k7 -> 2
 // lookup k9 -> 2
 //
-
 
 func nodeLookupLE(node BNode, current []byte) uint16 {
 	nkeys := node.nkeys()
@@ -834,18 +850,18 @@ func nodeLookupLE(node BNode, current []byte) uint16 {
 	return i - 1
 }
 
-func leafInsertOrUpdate(new BNode,old BNode,key []byte,val []byte) {
+func leafInsertOrUpdate(new BNode, old BNode, key []byte, val []byte) {
 
 	//finding the index of the last key <= the given key
-    idx := nodeLookupLE(old, key)
+	idx := nodeLookupLE(old, key)
 
-    if bytes.Equal(key, old.getKey(idx)) {
-        // Key already exists -> update its value.
-        leafUpdate(old, new, idx, key, val)
-    } else {
-        // Key doesn't exist -> insert after the last key <= key.
-        leafInsert(old, new, idx+1, key, val)
-    }
+	if bytes.Equal(key, old.getKey(idx)) {
+		// Key already exists -> update its value.
+		leafUpdate(old, new, idx, key, val)
+	} else {
+		// Key doesn't exist -> insert after the last key <= key.
+		leafInsert(old, new, idx+1, key, val)
+	}
 }
 
 // -----------------------------------------------------------------------------
@@ -860,53 +876,53 @@ func leafInsertOrUpdate(new BNode,old BNode,key []byte,val []byte) {
 //
 
 func nodeSplit2(old BNode, left BNode, right BNode) {
-    if old.nkeys() < 2 {
-        panic("Cannot split a node with less than 2 keys")
-    }
+	if old.nkeys() < 2 {
+		panic("Cannot split a node with less than 2 keys")
+	}
 
-    // Start with the split in the middle.
-    nleft := old.nkeys() / 2
+	// Start with the split in the middle.
+	nleft := old.nkeys() / 2
 
-    // Calculate the size of the left node.
-    leftBytes := func() uint16 {
-        return 4 + 8*nleft + 2*nleft + old.getOffset(nleft)
-    }
+	// Calculate the size of the left node.
+	leftBytes := func() uint16 {
+		return 4 + 8*nleft + 2*nleft + old.getOffset(nleft)
+	}
 
-    // If the left node is too large, move the split point left.
-    for leftBytes() > BTREE_PAGE_SIZE {
-        nleft--
-    }
+	// If the left node is too large, move the split point left.
+	for leftBytes() > BTREE_PAGE_SIZE {
+		nleft--
+	}
 
-    if nleft < 1 {
-        panic("left node cannot fit")
-    }
+	if nleft < 1 {
+		panic("left node cannot fit")
+	}
 
-    // Calculate the size of the right node.
-    rightBytes := func() uint16 {
-        return old.nbytes() - leftBytes() + 4
-    }
+	// Calculate the size of the right node.
+	rightBytes := func() uint16 {
+		return old.nbytes() - leftBytes() + 4
+	}
 
-    // If the right node is too large, move the split point right.
-    for rightBytes() > BTREE_PAGE_SIZE {
-        nleft++
-    }
+	// If the right node is too large, move the split point right.
+	for rightBytes() > BTREE_PAGE_SIZE {
+		nleft++
+	}
 
-    if nleft >= old.nkeys() {
-        panic("right node cannot fit")
-    }
+	if nleft >= old.nkeys() {
+		panic("right node cannot fit")
+	}
 
-    // Number of keys in the right node.
-    nright := old.nkeys() - nleft
+	// Number of keys in the right node.
+	nright := old.nkeys() - nleft
 
-    // Set headers.
-    left.setHeader(old.btype(), nleft)
-    right.setHeader(old.btype(), nright)
+	// Set headers.
+	left.setHeader(old.btype(), nleft)
+	right.setHeader(old.btype(), nright)
 
-    // Copy left half.
-    nodeAppendRange(left, old, 0, 0, nleft)
+	// Copy left half.
+	nodeAppendRange(left, old, 0, 0, nleft)
 
-    // Copy right half.
-    nodeAppendRange(right, old, 0, nleft, nright)
+	// Copy right half.
+	nodeAppendRange(right, old, 0, nleft, nright)
 }
 
 // -----------------------------------------------------------------------------
@@ -923,21 +939,21 @@ func nodeSplit2(old BNode, left BNode, right BNode) {
 // This handles the case where a large KV near the middle of the node
 // prevents the first split from producing two page-sized nodes.
 
-
-func nodeSplit3(old BNode)(uint16,[3]BNode){
+func nodeSplit3(old BNode) (uint16, [3]BNode) {
 
 	// -------------------------------------------------------------------------
 	// 1. Node already fits in one page
 	// -------------------------------------------------------------------------
 
-	if old.nbytes() <= BTREE_PAGE_SIZE { 
-		// old may be backed by a 2-page (8192 byte) buffer because 
-		// // treeInsert() creates temporary nodes with 2*BTREE_PAGE_SIZE. 
-		// // 
-		// // The node is logically one page, so return exactly one page. 
-		return 1, [3]BNode{old[:BTREE_PAGE_SIZE]} }
+	if old.nbytes() <= BTREE_PAGE_SIZE {
+		// old may be backed by a 2-page (8192 byte) buffer because
+		// // treeInsert() creates temporary nodes with 2*BTREE_PAGE_SIZE.
+		// //
+		// // The node is logically one page, so return exactly one page.
+		return 1, [3]BNode{old[:BTREE_PAGE_SIZE]}
+	}
 
-		fmt.Println("SPLIT",old.nbytes(), "bytes")
+	fmt.Println("SPLIT", old.nbytes(), "bytes")
 
 	// -------------------------------------------------------------------------
 	// 2. First split
@@ -949,15 +965,15 @@ func nodeSplit3(old BNode)(uint16,[3]BNode){
 	// Right should fit into one page after nodeSplit2.
 	right := BNode(make([]byte, BTREE_PAGE_SIZE))
 
-	nodeSplit2(old,left,right)
+	nodeSplit2(old, left, right)
 
 	// -------------------------------------------------------------------------
 	// 3. Check whether the left side fits
 	// -------------------------------------------------------------------------
 
-	if left.nbytes()<=BTREE_PAGE_SIZE{
+	if left.nbytes() <= BTREE_PAGE_SIZE {
 		left = left[:BTREE_PAGE_SIZE]
-		return 2,[3]BNode{left,right}
+		return 2, [3]BNode{left, right}
 	}
 
 	// -------------------------------------------------------------------------
@@ -967,7 +983,7 @@ func nodeSplit3(old BNode)(uint16,[3]BNode){
 	leftleft := BNode(make([]byte, BTREE_PAGE_SIZE))
 	middle := BNode(make([]byte, BTREE_PAGE_SIZE))
 
-	nodeSplit2(left,leftleft,middle)
+	nodeSplit2(left, leftleft, middle)
 
 	// leftleft must fit because nodeSplit2 guarantees the right side fits
 	// and the remaining split is now small enough.
@@ -979,8 +995,9 @@ func nodeSplit3(old BNode)(uint16,[3]BNode){
 	// 5. Return three nodes
 	// -------------------------------------------------------------------------
 
-	return 3,[3]BNode{leftleft,middle,right}
+	return 3, [3]BNode{leftleft, middle, right}
 }
+
 // -----------------------------------------------------------------------------
 // Replace one child with multiple children
 // -----------------------------------------------------------------------------
