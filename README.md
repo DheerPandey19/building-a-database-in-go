@@ -40,6 +40,6 @@ All persistence tests passed.
 
 - Go
 
-## Learning Goals
+## Learning Goal
 
 This is a learning project created to better understand how databases manage data on disk and recover it between program runs.
