@@ -68,7 +68,48 @@ type BTree struct {
 	// Delete/deallocate a page.
 	del func(uint64)
 }
+// -----------------------------------------------------------------------------
+// Free List Node
+// -----------------------------------------------------------------------------
+//
+// A free-list node is one 4KB page:
+//
+// +----------+-------------------------------+
+// | next     | free page pointers            |
+// | 8 bytes  | 8 bytes each                  |
+// +----------+-------------------------------+
+//
+// next = page number of the next free-list node.
+//
+// The remaining bytes store page numbers that are
+// currently available for reuse.
+//
+type LNode[]byte
 
+const (
+	FREE_LIST_HEADER=8
+	FREE_LIST_CAP=(BTREE_PAGE_SIZE-FREE_LIST_HEADER)/8
+)
+// getNext returns the page number of the next free-list node.
+func (node LNode)getNext() uint64{
+	return binary.LittleEndian.Uint64(node[0:8])
+}
+// setNext stores the page number of the next free-list node.
+func (node LNode)setNext() (next uint64)
+{
+	binary.LittleEndian.PutUint64(node[0:8],next)
+}
+// getPtr returns the page number stored at index idx.
+func(node LNode)getPtr(idx int)uint64{
+	pos := FREE_LIST_HEADER + idx*8
+	return binary.LittleEndian.Uint64(node[pos,pos+8])
+}
+// setPtr stores a page number at index idx.
+func (node LNode)setPtr(idx int , ptr uint64)
+{
+	pos := FREE_LIST_HEADER + idx*8
+	binary.LittleEndian.PutUint64(node[pos,pos+8],ptr)
+}
 // -----------------------------------------------------------------------------
 // KV Store
 // -----------------------------------------------------------------------------
