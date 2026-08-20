@@ -88,6 +88,9 @@ type KV struct {
 	// B+Tree stored in the database.
 	tree BTree
 
+	//boolean value to store failure
+	failed bool
+
 	// mmap information
 	mmap struct {
 		total  int
@@ -410,25 +413,26 @@ func updateFile(db *KV) error {
 }
 
 // Open()
-//  │
-//  ├── syscall.Open()
-//  │      └── opens/creates database.db
-//  │
-//  ├── Fstat()
-//  │      └── gets actual file size
-//  │
-//  ├── extendMmap()
-//  │      └── maps existing file into memory
-//  │
-//  └── readRoot()
-//         │
-//         ├── fileSize == 0
-//         │      └── flushed = 1
-//         │
-//         └── fileSize > 0
-//                └── loadMeta()
-//                       ├── tree.root
-//                       └── page.flushed
+//
+//	│
+//	├── syscall.Open()
+//	│      └── opens/creates database.db
+//	│
+//	├── Fstat()
+//	│      └── gets actual file size
+//	│
+//	├── extendMmap()
+//	│      └── maps existing file into memory
+//	│
+//	└── readRoot()
+//	       │
+//	       ├── fileSize == 0
+//	       │      └── flushed = 1
+//	       │
+//	       └── fileSize > 0
+//	              └── loadMeta()
+//	                     ├── tree.root
+//	                     └── page.flushed
 func (db *KV) Open() error {
 	fd, err := syscall.Open(db.Path, syscall.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
@@ -485,12 +489,31 @@ func (db *KV) Get(key []byte) []byte {
 
 func updateOrRevert(db *KV, meta []byte) error {
 
+	// If the previous update failed,
+	// first restore the known-good meta page.
+	if db.failed {
+		if err := updateRoot(db); err != nil {
+			return err
+		}
+
+		if err := syscall.Fsync(db.fd); err != nil {
+			return err
+		}
+
+		db.failed = false
+	}
+
+	// Try the new update.
 	err := updateFile(db)
 
 	if err != nil {
+		// The disk meta page may now be in an unknown state.
+		db.failed = true
 
-		//we restore the old state
+		// Restore the old in-memory state.
 		loadMeta(db, meta)
+
+		// Discard temporary pages.
 		db.page.temp = db.page.temp[:0]
 	}
 
@@ -730,19 +753,20 @@ func nodeAppendKV(new BNode, idx uint16, ptr uint64, key []byte, val []byte) {
 // Example:
 //
 // old:  [k1] [k3] [k7]
-//             ↑
-//          srcOld = 1
+//
+//	   ↑
+//	srcOld = 1
 //
 // new:  [   ] [   ]
-//        ↑
-//     dstNew = 0
+//
+//	   ↑
+//	dstNew = 0
 //
 // nodeAppendRange(new, old, 0, 1, 2)
 //
 // copies:
 // old[1] -> new[0]
 // old[2] -> new[1]
-//
 func nodeAppendRange(
 	new BNode,
 	old BNode,
