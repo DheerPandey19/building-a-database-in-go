@@ -230,8 +230,12 @@ type KV struct {
 	// page allocation information
 	page struct {
 		flushed uint64
-		temp    [][]byte
+		nappend uint64
+		updates map[uint64][]byte
 	}
+
+	// Free list.
+	free FreeList
 }
 
 func extendMmap(db *KV, size int) error {
