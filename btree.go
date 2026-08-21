@@ -102,14 +102,71 @@ func (node LNode)setNext() (next uint64)
 // getPtr returns the page number stored at index idx.
 func(node LNode)getPtr(idx int)uint64{
 	pos := FREE_LIST_HEADER + idx*8
-	return binary.LittleEndian.Uint64(node[pos,pos+8])
+	return binary.LittleEndian.Uint64(node[pos:pos+8])
 }
 // setPtr stores a page number at index idx.
 func (node LNode)setPtr(idx int , ptr uint64)
 {
 	pos := FREE_LIST_HEADER + idx*8
-	binary.LittleEndian.PutUint64(node[pos,pos+8],ptr)
+	binary.LittleEndian.PutUint64(node[pos:pos+8],ptr)
 }
+
+type FreeList struct{
+	// callbacks for page management
+	get func(uint64) []byte
+	new func([]byte) uint64
+	set func(uint64) []byte
+
+	 // persisted state
+	 headPage uint64
+	 headSeq  uint64
+	 tailPage uint64
+	 tailSeq  uint64
+ 
+	 // in-memory state
+	 maxSeq uint64
+}
+//sequence number → physical slot
+func seq2idx(seq uint64) int{
+	return int(seq%FREE_LIST_CAP)
+}
+//It basically takes a snapshot:
+func (fl* freelist)SetMaxSeq(){
+	fl.maxSeq=fl.tailSeq
+}
+
+func flPop(fl *FreeList)(ptr uint64,head uint64){
+	if fl.headSeq==fl.maxSeq{
+		return 0,0
+	}
+	node := LNode(fl.get(fl.headPage))
+
+	ptr := node.getPtr(seq2idx(fl.headSeq))
+
+	fl.headSeq++
+
+	if seq2idx(fl.headSeq) == 0 {
+		head = fl.headPage
+		fl.headPage = node.getNext()
+	
+		if fl.headPage == 0 {
+			panic("free list head is zero")
+		}
+	}
+
+	return
+}
+
+func (fl *FreeList) PopHead() uint64 {
+    ptr, head := flPop(fl)
+
+    if head != 0 {
+        fl.PushTail(head)
+    }
+
+    return ptr
+}
+
 // -----------------------------------------------------------------------------
 // KV Store
 // -----------------------------------------------------------------------------
