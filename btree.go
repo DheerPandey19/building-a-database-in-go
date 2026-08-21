@@ -95,7 +95,7 @@ func (node LNode)getNext() uint64{
 	return binary.LittleEndian.Uint64(node[0:8])
 }
 // setNext stores the page number of the next free-list node.
-func (node LNode)setNext() (next uint64)
+func (node LNode) setNext() (next uint64)
 {
 	binary.LittleEndian.PutUint64(node[0:8],next)
 }
@@ -131,7 +131,7 @@ func seq2idx(seq uint64) int{
 	return int(seq%FREE_LIST_CAP)
 }
 //It basically takes a snapshot:
-func (fl* freelist)SetMaxSeq(){
+func (fl* Freelist)SetMaxSeq(){
 	fl.maxSeq=fl.tailSeq
 }
 
@@ -141,7 +141,7 @@ func flPop(fl *FreeList)(ptr uint64,head uint64){
 	}
 	node := LNode(fl.get(fl.headPage))
 
-	ptr := node.getPtr(seq2idx(fl.headSeq))
+	ptr = node.getPtr(seq2idx(fl.headSeq))
 
 	fl.headSeq++
 
@@ -167,6 +167,38 @@ func (fl *FreeList) PopHead() uint64 {
     return ptr
 }
 
+//pushtail implementation
+
+func (fl * FreeList )PushTail(ptr uint64){
+	//add items to the end of the list
+
+	LNode(fl.set(fl.tailPage)).setPtr(seq2idx(fl.tailSeq),ptr)
+	fl.tailSeq++
+
+	//Tail node is now full 
+
+	if seq2idx(fl.tailSeq)==0{
+		// Try to reuse a node from the free list.
+		head,next=flpop(fl)
+
+		//if nothing is available , append a new page
+		if next==0{
+			next = fl.new(make[]byte,BTREE_PAGE_SIZE)
+		}
+
+		//now we link the current tail to the new tail
+		LNode(fl.set(fl.tailPage)).setNext(next)
+		fl.tailPage = next
+
+		// If flPop emptied the old head node,
+		// recycle that node by putting it in the new tail.
+		if head != 0 {
+			LNode(fl.set(fl.tailPage)).setPtr(0, head)
+			fl.tailSeq++
+		}
+
+	}
+}
 // -----------------------------------------------------------------------------
 // KV Store
 // -----------------------------------------------------------------------------
