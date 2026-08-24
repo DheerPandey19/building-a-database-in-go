@@ -95,49 +95,51 @@ func (node LNode)getNext() uint64{
 	return binary.LittleEndian.Uint64(node[0:8])
 }
 // setNext stores the page number of the next free-list node.
-func (node LNode) setNext() (next uint64)
-{
-	binary.LittleEndian.PutUint64(node[0:8],next)
-}
-// getPtr returns the page number stored at index idx.
-func(node LNode)getPtr(idx int)uint64{
-	pos := FREE_LIST_HEADER + idx*8
-	return binary.LittleEndian.Uint64(node[pos:pos+8])
-}
-// setPtr stores a page number at index idx.
-func (node LNode)setPtr(idx int , ptr uint64)
-{
-	pos := FREE_LIST_HEADER + idx*8
-	binary.LittleEndian.PutUint64(node[pos:pos+8],ptr)
+func (node LNode) setNext(next uint64) {
+	binary.LittleEndian.PutUint64(node[0:8], next)
 }
 
-type FreeList struct{
+// getPtr returns the page number stored at index idx.
+func (node LNode) getPtr(idx int) uint64 {
+	pos := FREE_LIST_HEADER + idx*8
+	return binary.LittleEndian.Uint64(node[pos : pos+8])
+}
+
+// setPtr stores a page number at index idx.
+func (node LNode) setPtr(idx int, ptr uint64) {
+	pos := FREE_LIST_HEADER + idx*8
+	binary.LittleEndian.PutUint64(node[pos:pos+8], ptr)
+}
+
+type FreeList struct {
 	// callbacks for page management
 	get func(uint64) []byte
 	new func([]byte) uint64
 	set func(uint64) []byte
 
-	 // persisted state
-	 headPage uint64
-	 headSeq  uint64
-	 tailPage uint64
-	 tailSeq  uint64
- 
-	 // in-memory state
-	 maxSeq uint64
-}
-//sequence number → physical slot
-func seq2idx(seq uint64) int{
-	return int(seq%FREE_LIST_CAP)
-}
-//It basically takes a snapshot:
-func (fl* Freelist)SetMaxSeq(){
-	fl.maxSeq=fl.tailSeq
+	// persisted state
+	headPage uint64
+	headSeq  uint64
+	tailPage uint64
+	tailSeq  uint64
+
+	// in-memory state
+	maxSeq uint64
 }
 
-func flPop(fl *FreeList)(ptr uint64,head uint64){
-	if fl.headSeq==fl.maxSeq{
-		return 0,0
+// sequence number → physical slot
+func seq2idx(seq uint64) int {
+	return int(seq % FREE_LIST_CAP)
+}
+
+// make newly added items available for consumption
+func (fl *FreeList) SetMaxSeq() {
+	fl.maxSeq = fl.tailSeq
+}
+
+func flPop(fl *FreeList) (ptr uint64, head uint64) {
+	if fl.headSeq == fl.maxSeq {
+		return 0, 0
 	}
 	node := LNode(fl.get(fl.headPage))
 
@@ -145,10 +147,11 @@ func flPop(fl *FreeList)(ptr uint64,head uint64){
 
 	fl.headSeq++
 
+	// move to the next node if the head node is empty
 	if seq2idx(fl.headSeq) == 0 {
 		head = fl.headPage
 		fl.headPage = node.getNext()
-	
+
 		if fl.headPage == 0 {
 			panic("free list head is zero")
 		}
@@ -158,45 +161,38 @@ func flPop(fl *FreeList)(ptr uint64,head uint64){
 }
 
 func (fl *FreeList) PopHead() uint64 {
-    ptr, head := flPop(fl)
+	ptr, head := flPop(fl)
 
-    if head != 0 {
-        fl.PushTail(head)
-    }
+	if head != 0 {
+		fl.PushTail(head)
+	}
 
-    return ptr
+	return ptr
 }
 
-//pushtail implementation
-
-func (fl * FreeList )PushTail(ptr uint64){
-	//add items to the end of the list
-
-	LNode(fl.set(fl.tailPage)).setPtr(seq2idx(fl.tailSeq),ptr)
+func (fl *FreeList) PushTail(ptr uint64) {
+	// add it to the tail node
+	LNode(fl.set(fl.tailPage)).setPtr(seq2idx(fl.tailSeq), ptr)
 	fl.tailSeq++
 
-	//Tail node is now full 
-
-	if seq2idx(fl.tailSeq)==0{
-		// Try to reuse a node from the free list.
-		head,next=flpop(fl)
-
-		//if nothing is available , append a new page
-		if next==0{
-			next = fl.new(make[]byte,BTREE_PAGE_SIZE)
+	// add a new tail node if it's full (the list is never empty)
+	if seq2idx(fl.tailSeq) == 0 {
+		// try to reuse from the list head
+		next, head := flPop(fl) // may remove the head node
+		if next == 0 {
+			// or allocate a new node by appending
+			next = fl.new(make([]byte, BTREE_PAGE_SIZE))
 		}
 
-		//now we link the current tail to the new tail
+		// link to the new tail node
 		LNode(fl.set(fl.tailPage)).setNext(next)
 		fl.tailPage = next
 
-		// If flPop emptied the old head node,
-		// recycle that node by putting it in the new tail.
+		// also add the head node if it's removed
 		if head != 0 {
 			LNode(fl.set(fl.tailPage)).setPtr(0, head)
 			fl.tailSeq++
 		}
-
 	}
 }
 // -----------------------------------------------------------------------------
@@ -280,35 +276,23 @@ func extendMmap(db *KV, size int) error {
 	return nil
 }
 
-// pageRead returns the 4KB database page identified by ptr.
-//
-// ptr is a page number, not a byte offset.
-// For example:
-//   ptr = 0 → first page
-//   ptr = 1 → second page
-//   ptr = 2 → third page
-
+// pageRead returns a page, consulting pending updates first.
 func (db *KV) pageRead(ptr uint64) []byte {
-
-	// Check temporary pages first.
-	if ptr >= db.page.flushed {
-		idx := ptr - db.page.flushed
-
-		if idx < uint64(len(db.page.temp)) {
-			return db.page.temp[idx]
-		}
+	if node, ok := db.page.updates[ptr]; ok {
+		return node
 	}
+	return db.pageReadFile(ptr)
+}
 
-	// Existing mmap logic...
+// pageReadFile reads a page from the memory-mapped file.
+func (db *KV) pageReadFile(ptr uint64) []byte {
 	start := uint64(0)
 
 	for _, chunk := range db.mmap.chunks {
-
 		end := start + uint64(len(chunk))/BTREE_PAGE_SIZE
 
 		if ptr < end {
 			offset := BTREE_PAGE_SIZE * (ptr - start)
-
 			return chunk[offset : offset+BTREE_PAGE_SIZE]
 		}
 
@@ -318,63 +302,58 @@ func (db *KV) pageRead(ptr uint64) []byte {
 	panic("bad pointer")
 }
 
-// pageAppend temporarily stores a newly created B+Tree page
-// and returns the page number assigned to it.
-//
-// The page is not written to disk yet.
-// It will be written later by writePages().
+// pageWrite returns a writable page copy to capture in-place updates.
+func (db *KV) pageWrite(ptr uint64) []byte {
+	if node, ok := db.page.updates[ptr]; ok {
+		return node
+	}
+	node := make([]byte, BTREE_PAGE_SIZE)
+	if int((ptr+1)*BTREE_PAGE_SIZE) <= db.mmap.total {
+		copy(node, db.pageReadFile(ptr))
+	}
+	db.page.updates[ptr] = node
+	return node
+}
 
+// pageAppend appends a new page after the flushed region.
 func (db *KV) pageAppend(node []byte) uint64 {
-	// New pages are appended after all pages that have
-	// already been written to the database file
-	ptr := db.page.flushed + uint64(len(db.page.temp))
-
-	// Keep the new page in memory until it is flushed to disk.
-	db.page.temp = append(db.page.temp, node)
-
+	ptr := db.page.flushed + db.page.nappend
+	db.page.nappend++
+	db.page.updates[ptr] = node
 	return ptr
 }
 
-// writePages writes all newly created pages in db.page.temp
-// to the database file.
-//
-// The pages are written starting at db.page.flushed.
-// After they are written, they are considered persistent
-// pages and are removed from the temporary list.
+// pageAlloc allocates a page from the free list, or appends.
+func (db *KV) pageAlloc(node []byte) uint64 {
+	if ptr := db.free.PopHead(); ptr != 0 {
+		db.page.updates[ptr] = node
+		return ptr
+	}
+	return db.pageAppend(node)
+}
 
+// writePages writes all pending page updates to the database file.
 func writePages(db *KV) error {
-	// Calculate the total size of the database after
-	// adding all temporary pages.
-	size := (int(db.page.flushed) + len(db.page.temp)) * BTREE_PAGE_SIZE
+	size := (int(db.page.flushed) + int(db.page.nappend)) * BTREE_PAGE_SIZE
 
-	// Make sure the mmap is large enough to cover
-	// the pages we are about to write.
 	if err := extendMmap(db, size); err != nil {
 		return err
 	}
 
-	// Calculate the byte offset where the new pages begin.
-	offset := int64(db.page.flushed * BTREE_PAGE_SIZE)
-
-	// Write all temporary pages to the database file.
-	//Pwritev writes multiple byte slices to the file in one operation.
-	for _, page := range db.page.temp {
+	for ptr, page := range db.page.updates {
+		offset := int64(ptr * BTREE_PAGE_SIZE)
 		n, err := syscall.Pwrite(db.fd, page, offset)
 		if err != nil {
 			return err
 		}
-
 		if n != len(page) {
 			return fmt.Errorf("short write: wrote %d of %d bytes", n, len(page))
 		}
-
-		offset += int64(len(page))
 	}
-	// The temporary pages have now been written to disk.
-	db.page.flushed += uint64(len(db.page.temp))
 
-	// Clear the temporary pages.
-	db.page.temp = db.page.temp[:0]
+	db.page.flushed += db.page.nappend
+	db.page.nappend = 0
+	db.page.updates = map[uint64][]byte{}
 
 	return nil
 }
@@ -389,10 +368,12 @@ func writePages(db *KV) error {
 
 func readRoot(db *KV, filesize int64) error {
 	if filesize == 0 {
-		// Reserve page 0 for the meta page.
-		// B+Tree pages will start from page 1.
-		db.page.flushed = 1
-		return nil
+		// reserve 2 pages: the meta page and a free list node
+		db.page.flushed = 2
+		// add an initial node to the free list so it's never empty
+		db.free.headPage = 1 // the 2nd page
+		db.free.tailPage = 1
+		return nil // the meta page will be written in the 1st update
 	}
 
 	// The database already contains a meta page.
@@ -404,10 +385,7 @@ func readRoot(db *KV, filesize int64) error {
 		return fmt.Errorf("bad database file")
 	}
 
-	// Load the root pointer and page count
-	// from the meta page.
 	loadMeta(db, data)
-
 	return nil
 }
 
@@ -451,15 +429,13 @@ func readRoot(db *KV, filesize int64) error {
 func saveMeta(db *KV) []byte {
 	var data [BTREE_PAGE_SIZE]byte
 
-	// Identify this file as a BuildYourOwnDB database.
 	copy(data[:16], []byte(DB_SIG))
-
-	// Store the current B+Tree root page number.
 	binary.LittleEndian.PutUint64(data[16:], db.tree.root)
-
-	// Store the number of pages that have already
-	// been written to the database
 	binary.LittleEndian.PutUint64(data[24:], db.page.flushed)
+	binary.LittleEndian.PutUint64(data[32:], db.free.headPage)
+	binary.LittleEndian.PutUint64(data[40:], db.free.headSeq)
+	binary.LittleEndian.PutUint64(data[48:], db.free.tailPage)
+	binary.LittleEndian.PutUint64(data[56:], db.free.tailSeq)
 
 	return data[:]
 }
@@ -520,13 +496,16 @@ func updateRoot(db *KV) error {
 // of pages that have already been written.
 func loadMeta(db *KV, data []byte) {
 	db.tree.root = binary.LittleEndian.Uint64(data[16:24])
-
-	// Read the number of flushed pages.
 	db.page.flushed = binary.LittleEndian.Uint64(data[24:32])
+	db.free.headPage = binary.LittleEndian.Uint64(data[32:40])
+	db.free.headSeq = binary.LittleEndian.Uint64(data[40:48])
+	db.free.tailPage = binary.LittleEndian.Uint64(data[48:56])
+	db.free.tailSeq = binary.LittleEndian.Uint64(data[56:64])
+	db.free.SetMaxSeq()
 }
 
 func updateFile(db *KV) error {
-	// 1. Write new B+Tree pages.
+	// 1. Write new / updated pages.
 	if err := writePages(db); err != nil {
 		return err
 	}
@@ -537,13 +516,19 @@ func updateFile(db *KV) error {
 		return err
 	}
 
-	// 3. Update the root pointer.
+	// 3. Update the root pointer (and free-list meta).
 	if err := updateRoot(db); err != nil {
 		return err
 	}
 
 	// 4. Make the updated root durable.
-	return syscall.Fsync(db.fd)
+	if err := syscall.Fsync(db.fd); err != nil {
+		return err
+	}
+
+	// prepare the free list for the next update
+	db.free.SetMaxSeq()
+	return nil
 }
 
 // Open()
@@ -593,10 +578,15 @@ func (db *KV) Open() error {
 		return err
 	}
 
-	// Connect B+Tree to page manager.
+	db.page.updates = map[uint64][]byte{}
+
+	// Connect B+Tree and free list to page manager.
 	db.tree.get = db.pageRead
-	db.tree.new = db.pageAppend
-	db.tree.del = func(uint64) {}
+	db.tree.new = db.pageAlloc
+	db.tree.del = db.free.PushTail
+	db.free.get = db.pageRead
+	db.free.new = db.pageAppend
+	db.free.set = db.pageWrite
 
 	return nil
 }
@@ -647,8 +637,9 @@ func updateOrRevert(db *KV, meta []byte) error {
 		// Restore the old in-memory state.
 		loadMeta(db, meta)
 
-		// Discard temporary pages.
-		db.page.temp = db.page.temp[:0]
+		// Discard pending page updates.
+		db.page.nappend = 0
+		db.page.updates = map[uint64][]byte{}
 	}
 
 	return err
