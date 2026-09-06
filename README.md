@@ -98,7 +98,4 @@ go.mod     — module build-your-own-db
 - Relational layer on top of the KV store
 - Windows-native page I/O (no Unix mmap)
 
-## Learning goal
 
-Understand how a real embedded database keeps a B+tree on disk, makes updates
-atomic, and reuses space without corrupting older versions of the tree.
